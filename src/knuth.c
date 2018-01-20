@@ -13,7 +13,7 @@
  * The size of a chunk is stored in the header and footer for sanity
  * checking. When the size is negative, the chunk is taken.
  *
- * A link is an 4-byte offset (indexing as uint32) into the buffer that
+ * A link is an index into the uint32_t buffer that
  * corresponds to the location of the header. The links are used to maintain
  * a free list of chunks
  *
@@ -86,9 +86,12 @@ struct chunk * get_chunk(uint32_t offset)
 }
 
 // returns pointer to data for a chunk
+// if chunk is NULL, then return NULL
 static inline
 void * get_ptr(struct chunk * chunk)
 {
+    if (chunk == NULL)
+        return NULL;
     return &(chunk->next);
 }
 
@@ -103,9 +106,9 @@ struct chunk * from_ptr(void * p)
 #define abs(x) ((int32_t)(x) < 0 ? -(int32_t)(x) :  (int32_t)(x))
 #define neg(x) ((int32_t)(x) < 0 ?  (int32_t)(x) : -(int32_t)(x))
 
-// get size (4-byte words) of a chunk
+// get total space (4-byte words) taken by a chunk (includes metadata)
 static inline
-uint32_t chunk_size(struct chunk * chunk)
+uint32_t chunk_space(struct chunk * chunk)
 {
     uint32_t size = abs(chunk->size) + 2;
     return size;
@@ -133,6 +136,13 @@ void set_footer(struct chunk * chunk, int32_t footer_val)
 {
     int32_t * footer = get_footer(chunk);
     *footer = footer_val;
+}
+
+static inline
+void set_size(struct chunk * chunk, int32_t size)
+{
+    chunk->size = size;
+    set_footer(chunk, size);
 }
 
 static inline
@@ -274,7 +284,7 @@ void add_free_chunk(struct chunk * chunk)
 // applies the allocation to this chunk
 // may break the the chunk up
 static
-void * allocate_chunk(struct chunk * chunk, size_t byte_size, int clear)
+struct chunk * allocate_chunk(struct chunk * chunk, size_t byte_size, int clear)
 {
     // take this chunk out of the free list
     remove_free_chunk(chunk);
@@ -284,19 +294,17 @@ void * allocate_chunk(struct chunk * chunk, size_t byte_size, int clear)
     if (to_bytes(chunk->size + 2) >=
         sizeof(struct chunk) + sizeof(uint32_t) + byte_size) {
         // break
-        uint32_t available_space = chunk_size(chunk) - 4;
+        uint32_t available_space = chunk_space(chunk) - 4;
         uint32_t size = round_up(byte_size);
         if (size < 2)
             size = 2;
 
         // resize the original chunk
-        chunk->size = size;
-        set_footer(chunk, chunk->size);
+        set_size(chunk, size);
 
         // setup the new chunk
         struct chunk * new_chunk = get_adj_next(chunk);
-        new_chunk->size = available_space - size;
-        set_footer(new_chunk, new_chunk->size);
+        set_size(new_chunk, available_space - size);
         add_free_chunk(new_chunk);
     } else {
         // don't break
@@ -313,13 +321,14 @@ void * allocate_chunk(struct chunk * chunk, size_t byte_size, int clear)
         }
     }
 
-    chunk->size = neg(chunk->size);
-    set_footer(chunk, chunk->size);
-    return get_ptr(chunk);
+    set_size(chunk, neg(chunk->size));
+    return chunk;
 }
 
+// finds best chunk and allocates it
+// returns the chunk
 static
-void * alloc(size_t n, int clear)
+struct chunk * alloc(size_t n, int clear)
 {
     if (n == 0)
         return NULL;
@@ -337,14 +346,14 @@ struct chunk * join(struct chunk * l, struct chunk * r)
 {
     // combine sizes, +2 for reclaiming a header and footer
     int32_t size = l->size + r->size + 2;
-    l->size = size;
-    set_footer(l, size);
+    set_size(l, size);
     return l;
 }
 
-// coalesce a chunk with surrounding chunks, adding it to the free list
+// coalesce a chunk with surrounding chunks
+// returns pointer to newly formed chunk
 static
-void coalesce(struct chunk * chunk)
+struct chunk * coalesce(struct chunk * chunk)
 {
     // coalesce right
     struct chunk * r = get_adj_next(chunk);
@@ -364,8 +373,103 @@ void coalesce(struct chunk * chunk)
         l = get_adj_prev(chunk);
     }
 
-    // add the final chunk to the free list
+    return chunk;
+}
+
+// returns the potential size if a coalesce happens with a chunk
+static
+uint32_t coalesce_probe(struct chunk * chunk)
+{
+    // measure the total space
+    uint32_t space = chunk_space(chunk);
+
+    // right
+    struct chunk * r = get_adj_next(chunk);
+    while (r != NULL && r->size > 0) {
+        space += chunk_space(r);
+        r = get_adj_next(r);
+    }
+
+    // left
+    struct chunk * l = get_adj_prev(chunk);
+    while (l != NULL && l->size > 0) {
+        space += chunk_space(l);
+        l = get_adj_prev(l);
+    }
+
+    return space;
+}
+
+// transfer n uint32_t's from src to dst
+// guaranteed to not destroy data
+static
+void transfer(uint32_t * dst, uint32_t * src, int32_t n)
+{
+    if (src < dst) {
+        // start from beginning
+        for (int32_t i = 0; i < n; ++i) {
+            dst[i] = src[i];
+        }
+    } else if (src > dst) {
+        // start from end
+        for (int32_t i = n-1; i >= 0 ; --i) {
+            dst[i] = src[i];
+        }
+    }
+}
+
+// deallocates a chunk, coalescing it if possible
+static
+void deallocate(struct chunk * chunk)
+{
+    // see if we can coalesce this chunk with surrounding chunks
+    set_size(chunk, abs(chunk->size));
+    chunk = coalesce(chunk);
     add_free_chunk(chunk);
+}
+
+static
+struct chunk * reallocate(struct chunk * chunk, size_t byte_size)
+{
+    uint32_t size = round_up(byte_size);
+    // 3 cases
+    // 1: chunk is already of requested size
+    // 2: we can coalesce around this chunk
+    // 3: otherwise, we need to find a new chunk
+
+    // case 1
+    if (abs(chunk->size) >= size) {
+        return chunk;
+    }
+
+    // save number of words to copy and buffer location
+    uint32_t * src = (uint32_t *) get_ptr(chunk);
+    int32_t num_words = abs(chunk->size);
+    uint32_t * dst = NULL;
+
+    // case 2
+    if (coalesce_probe(chunk) - 2 >= size) {
+        // perform the coalesce, then transfer the data
+        // coalesce() only messes with headers and footers: safe for transfer
+        // allocate_chunk() can break up the chunk
+        // since join() assumes that chunks are free, make the size positive
+        set_size(chunk, abs(chunk->size));
+        chunk = coalesce(chunk);
+        chunk = allocate_chunk(chunk, byte_size, 0);
+        dst = (uint32_t *) get_ptr(chunk);
+        transfer(dst, src, num_words);
+        return chunk;
+    }
+
+    // case 3
+    struct chunk * new_chunk = alloc(byte_size, 0);
+    if (new_chunk == NULL)
+        return NULL;
+    dst = (uint32_t *) get_ptr(new_chunk);
+    transfer(dst, src, num_words);
+    deallocate(chunk);
+
+    return new_chunk;
 }
 
 void knuth_init(void * buff, size_t buff_size)
@@ -386,17 +490,12 @@ void knuth_init(void * buff, size_t buff_size)
 
 void * knuth_malloc(size_t size)
 {
-    return alloc(size, 0);
-}
-
-void * knuth_realloc(void * ptr, size_t size)
-{
-    return ptr;
+    return get_ptr(alloc(size, 0));
 }
 
 void * knuth_calloc(size_t nmemb, size_t size)
 {
-    return alloc(nmemb * size, 1);
+    return get_ptr(alloc(nmemb * size, 1));
 }
 
 void knuth_free(void * ptr)
@@ -413,10 +512,35 @@ void knuth_free(void * ptr)
 
     if (chunk->size >= 0) {
         return;
+        // ... or do some form of assertion fail
     }
 
-    // see if we can coalesce this chunk with surrounding chunks
-    chunk->size = abs(chunk->size);
-    set_footer(chunk, chunk->size);
-    coalesce(chunk);
+    deallocate(chunk);
+}
+
+void * knuth_realloc(void * ptr, size_t size)
+{
+    // defined: realloc with NULL ptr is a malloc
+    if (ptr == NULL)
+        return knuth_malloc(size);
+
+    // defined: realloc with size 0 is a free
+    if (size == 0) {
+        knuth_free(ptr);
+        return NULL;
+    }
+
+    // do a metadata check
+    struct chunk * chunk = from_ptr(ptr);
+    if (!check_meta(chunk)) {
+        return;
+        // ... or do some form of assertion fail
+    }
+
+    if (chunk->size >= 0) {
+        return;
+        // ... or do some form of assertion fail
+    }
+
+    return get_ptr(reallocate(chunk, size));
 }

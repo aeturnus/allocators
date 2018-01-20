@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -19,10 +20,10 @@ extern "C"
 std::string print_buffer(int32_t * buffer, size_t num)
 {
     std::stringstream sstream;
-    static char buf[16];
+    static char buf[64];
     for (size_t i = 0; i < num; ++i) {
-        sprintf(buf, "[%02d]", i);
-        sstream << buf << ": " << buffer[i] << std::endl;
+        sprintf(buf, "[%02d]: 0x%08X | %d", i, buffer[i], buffer[i]);
+        sstream << buf << std::endl;
     }
     return sstream.str();
 }
@@ -132,4 +133,63 @@ TEST(knuth, free_coalesce)
     // should have coalesced into one big chunk
     ASSERT_EQ(18, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(18, buffer[19]) << pbuf(buffer);
+}
+
+TEST(knuth, realloc_same)
+{
+    static int32_t buffer[8];
+    knuth_init(buffer, sizeof(buffer));
+    const char * expect = "0123456789";
+    char * str = (char *) knuth_malloc(sizeof(char) * (strlen(expect) + 1));
+    strcpy(str, expect);
+    char * new_str = (char *) knuth_realloc(str, sizeof(char) * (strlen(expect) + 2));
+    ASSERT_EQ(str, new_str);
+    ASSERT_STREQ(expect, new_str);
+}
+
+TEST(knuth, realloc_coalesce)
+{
+    static int32_t buffer[20];
+    knuth_init(buffer, sizeof(buffer));
+    void * ptrs[5];
+    for (int i = 0; i < 5; ++i) {
+        ptrs[i] = knuth_malloc(sizeof(int32_t) * 2);
+    }
+
+    const char * expect = "hello";
+    strcpy((char *)ptrs[2], expect);
+    knuth_free(ptrs[0]);
+    knuth_free(ptrs[4]);
+    knuth_free(ptrs[1]);
+    knuth_free(ptrs[3]);
+    char * new_str = (char *) knuth_realloc(ptrs[2], 12);
+
+    // coalesce should've placed this pointer where ptrs[0] is
+    ASSERT_EQ(ptrs[0], new_str) << pbuf(buffer);
+    ASSERT_STREQ(expect, new_str) << pbuf(buffer);
+    ASSERT_EQ(-3, buffer[0]) << pbuf(buffer);
+    ASSERT_EQ(-3, buffer[4]) << pbuf(buffer);
+}
+
+TEST(knuth, realloc_new)
+{
+    static int32_t buffer[20];
+    knuth_init(buffer, sizeof(buffer));
+    void * ptrs[5];
+    for (int i = 0; i < 5; ++i) {
+        ptrs[i] = knuth_malloc(sizeof(int32_t) * 2);
+    }
+
+    const char * expect = "hello";
+    strcpy((char *)ptrs[4], expect);
+    knuth_free(ptrs[0]);
+    knuth_free(ptrs[1]);
+    knuth_free(ptrs[2]);
+    char * new_str = (char *) knuth_realloc(ptrs[4], 12);
+
+    // coalesce should've placed this pointer where ptrs[0] is
+    ASSERT_EQ(ptrs[0], new_str) << pbuf(buffer);
+    ASSERT_STREQ(expect, new_str) << pbuf(buffer);
+    ASSERT_EQ(-3, buffer[0]) << pbuf(buffer);
+    ASSERT_EQ(-3, buffer[4]) << pbuf(buffer);
 }
