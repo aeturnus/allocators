@@ -4,6 +4,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <set>
 
 #include <gtest/gtest.h>
 
@@ -195,4 +196,37 @@ TEST(knuth, realloc_new)
     ASSERT_STREQ(expect, new_str) << pbuf(buffer);
     ASSERT_EQ(-3, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(-3, buffer[4]) << pbuf(buffer);
+}
+
+TEST(knuth, many_allocs)
+{
+    struct knuth state;
+    #define NUM_WORDS 1024 * 1024
+    #define SIZE 128
+    //#define NUM_WORDS 128
+    //#define SIZE 32
+    static int32_t buffer[NUM_WORDS];
+    knuth_init(&state, buffer, sizeof(buffer));
+    std::set<void *> ptrs;
+
+    ASSERT_EQ(NUM_WORDS - 2, buffer[0]);
+    ASSERT_EQ(NUM_WORDS - 2, buffer[NUM_WORDS - 1]);
+
+    srand(0);
+    void * ptr = NULL;
+    size_t count = 0;
+    do {
+        ptr = knuth_malloc(&state, rand() % SIZE);
+        ptrs.insert(ptr);
+        ++count;
+    } while (ptr != NULL);
+
+    for (void * ptr : ptrs) {
+        knuth_free(&state, ptr);
+        --count;
+    }
+
+    ASSERT_EQ(0, count) << pbuf(buffer);
+    ASSERT_EQ(NUM_WORDS - 2, buffer[0]) << pbuf(buffer);
+    ASSERT_EQ(NUM_WORDS - 2, buffer[NUM_WORDS - 1]) << pbuf(buffer);
 }

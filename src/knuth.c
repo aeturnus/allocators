@@ -250,8 +250,8 @@ void add_free_chunk(struct knuth * state, struct chunk * chunk)
     struct chunk * curr = get_chunk(state, state->base);
     struct chunk * prev = NULL;
     while (curr != NULL) {
-        // if it's larger than current, it goes there
-        if (chunk->size > curr->size) {
+        // if it's smaller than current, it goes there
+        if (chunk->size < curr->size) {
             if (prev == NULL) {
                 // new base
                 state->base = get_offset(state, chunk);
@@ -259,10 +259,7 @@ void add_free_chunk(struct knuth * state, struct chunk * chunk)
                 chunk->next = get_offset(state, curr);
                 return;
             } else {
-                // add after curr: move curr to next so we can use prev and curr
-                prev = curr;
-                curr = get_next(state, curr);
-
+                // insert behind curr
                 prev->next = get_offset(state, chunk);
                 curr->prev = get_offset(state, chunk);
                 chunk->next = get_offset(state, curr);
@@ -278,6 +275,7 @@ void add_free_chunk(struct knuth * state, struct chunk * chunk)
     // if we get here, then this goes at the end
     prev->next  = get_offset(state, chunk);
     chunk->prev = get_offset(state, prev);
+    chunk->next = NIL;
 }
 
 // applies the allocation to this chunk
