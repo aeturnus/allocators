@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stddef.h>
+#include <knuth.h>
 
 /**
  * Knuth heap allocator with links
@@ -31,10 +32,7 @@
  * +N+4 |=====================================
  */
 
-uint32_t * buffer = NULL;
-size_t     buffer_bytes = 0;
 #define NIL 0xFFFFFFFF
-uint32_t base = NIL;
 
 struct chunk
 {
@@ -65,23 +63,23 @@ size_t to_bytes(uint32_t size)
 
 // get the offset in the buffer of a chunk
 static inline
-uint32_t get_offset(struct chunk * chunk)
+uint32_t get_offset(struct knuth * state, struct chunk * chunk)
 {
     if (chunk == NULL)
         return NIL;
 
-    uintptr_t byte_off = (uintptr_t) chunk - (uintptr_t) buffer;
+    uintptr_t byte_off = (uintptr_t) chunk - (uintptr_t) state->buffer;
     uint32_t off = round_down(byte_off);
     return off;
 }
 
 // offset into the buffer to get the chunk pointer
 static inline
-struct chunk * get_chunk(uint32_t offset)
+struct chunk * get_chunk(struct knuth * state, uint32_t offset)
 {
     if (offset == NIL)
         return NULL;
-    struct chunk * out = (struct chunk *) &buffer[offset];
+    struct chunk * out = (struct chunk *) &state->buffer[offset];
     return out;
 }
 
@@ -155,78 +153,78 @@ struct chunk * from_footer(int32_t * foot)
 
 // traversal: follow next
 static inline
-struct chunk * get_next(struct chunk * chunk)
+struct chunk * get_next(struct knuth * state, struct chunk * chunk)
 {
     if (chunk->next == NIL)
         return NULL;
-    return get_chunk(chunk->next);
+    return get_chunk(state, chunk->next);
 }
 
 // traversal: follow prev
 static inline
-struct chunk * get_prev(struct chunk * chunk)
+struct chunk * get_prev(struct knuth * state, struct chunk * chunk)
 {
     if (chunk->prev == NIL)
         return NULL;
-    return get_chunk(chunk->prev);
+    return get_chunk(state, chunk->prev);
 }
 
 // traversal: get adjacent chunk after this one
 static inline
-struct chunk * get_adj_next(struct chunk * chunk)
+struct chunk * get_adj_next(struct knuth * state, struct chunk * chunk)
 {
     struct chunk * adj = (struct chunk *) (get_footer(chunk) + 1);
 
     // boundary check
-    if (adj >= (((uint8_t *) buffer) + buffer_bytes))
+    if (adj >= (((uint8_t *) state->buffer) + state->buffer_bytes))
         return NULL;
     return adj;
 }
 
 // traversal: get adjacent chunk before this one
 static inline
-struct chunk * get_adj_prev(struct chunk * chunk)
+struct chunk * get_adj_prev(struct knuth * state, struct chunk * chunk)
 {
     int32_t * prev_foot = (int32_t *) (&(chunk->size) - 1);
     struct chunk * adj = from_footer(prev_foot);
-    if (adj < buffer)
+    if (adj < state->buffer)
         return NULL;
     return adj;
 }
 
 // find the best chunk for this
 static
-struct chunk * find_best_chunk(size_t byte_size)
+struct chunk * find_best_chunk(struct knuth * state, size_t byte_size)
 {
-    if (base == NIL)
+    if (state->base == NIL)
         return NULL;
 
     // round up the size
     int32_t size = round_up(byte_size);
 
-    struct chunk * curr = get_chunk(base);
+    struct chunk * curr = get_chunk(state, state->base);
     while (curr != NULL) {
         if (curr->size >= size) {
             return curr;
         }
-        curr = get_next(curr);
+        curr = get_next(state, curr);
     }
     return curr;
 }
 
 // remove chunk from the list
 static
-void remove_free_chunk(struct chunk * chunk)
+void remove_free_chunk(struct knuth * state, struct chunk * chunk)
 {
-    struct chunk * prev = get_prev(chunk);
-    struct chunk * next = get_next(chunk);
+    struct chunk * prev = get_prev(state, chunk);
+    struct chunk * next = get_next(state, chunk);
     if (prev == NULL && next == NULL) {
         // if there's nothing, base is now NIL
-        base = NIL;
+        state->base = NIL;
         return;
     } else if (prev == NULL) {
         // if prev is null, then next will be new base
-        base = chunk->next;
+        state->base = chunk->next;
         next->prev = NIL;
     } else if (next == NULL) {
         // if next is null, then pass the NIL to prev
@@ -239,55 +237,55 @@ void remove_free_chunk(struct chunk * chunk)
 
 // adds chunk to free list: smallest to largest
 static
-void add_free_chunk(struct chunk * chunk)
+void add_free_chunk(struct knuth * state, struct chunk * chunk)
 {
-    if (base == NIL) {
-        base = get_offset(chunk);
+    if (state->base == NIL) {
+        state->base = get_offset(state, chunk);
         chunk->next = NIL;
         chunk->prev = NIL;
         return;
     }
 
-    struct chunk * curr = get_chunk(base);
+    struct chunk * curr = get_chunk(state, state->base);
     struct chunk * prev = NULL;
     while (curr != NULL) {
         // if it's larger than current, it goes there
         if (chunk->size > curr->size) {
             if (prev == NULL) {
                 // new base
-                base = get_offset(chunk);
-                curr->prev = base;
-                chunk->next = get_offset(curr);
+                state->base = get_offset(state, chunk);
+                curr->prev = state->base;
+                chunk->next = get_offset(state, curr);
                 return;
             } else {
                 // add after curr: move curr to next so we can use prev and curr
                 prev = curr;
-                curr = get_next(curr);
+                curr = get_next(state, curr);
 
-                prev->next = get_offset(chunk);
-                curr->prev = get_offset(chunk);
-                chunk->next = get_offset(curr);
-                chunk->prev = get_offset(prev);
+                prev->next = get_offset(state, chunk);
+                curr->prev = get_offset(state, chunk);
+                chunk->next = get_offset(state, curr);
+                chunk->prev = get_offset(state, prev);
                 return;
             }
         }
 
         prev = curr;
-        curr = get_next(curr);
+        curr = get_next(state, curr);
     }
 
     // if we get here, then this goes at the end
-    prev->next  = get_offset(chunk);
-    chunk->prev = get_offset(prev);
+    prev->next  = get_offset(state, chunk);
+    chunk->prev = get_offset(state, prev);
 }
 
 // applies the allocation to this chunk
 // may break the the chunk up
 static
-struct chunk * allocate_chunk(struct chunk * chunk, size_t byte_size, int clear)
+struct chunk * allocate_chunk(struct knuth * state, struct chunk * chunk, size_t byte_size, int clear)
 {
     // take this chunk out of the free list
-    remove_free_chunk(chunk);
+    remove_free_chunk(state, chunk);
 
     // determine if chunk should be broken
     // break if we can fit another allocation chunk in all of this
@@ -303,9 +301,9 @@ struct chunk * allocate_chunk(struct chunk * chunk, size_t byte_size, int clear)
         set_size(chunk, size);
 
         // setup the new chunk
-        struct chunk * new_chunk = get_adj_next(chunk);
+        struct chunk * new_chunk = get_adj_next(state, chunk);
         set_size(new_chunk, available_space - size);
-        add_free_chunk(new_chunk);
+        add_free_chunk(state, new_chunk);
     } else {
         // don't break
         chunk->next = NIL;
@@ -328,14 +326,14 @@ struct chunk * allocate_chunk(struct chunk * chunk, size_t byte_size, int clear)
 // finds best chunk and allocates it
 // returns the chunk
 static
-struct chunk * alloc(size_t n, int clear)
+struct chunk * alloc(struct knuth * state, size_t n, int clear)
 {
     if (n == 0)
         return NULL;
-    struct chunk * chunk = find_best_chunk(n);
+    struct chunk * chunk = find_best_chunk(state, n);
     if (chunk == NULL)
         return NULL;
-    return allocate_chunk(chunk, n, clear);
+    return allocate_chunk(state, chunk, n, clear);
 }
 
 // joins to chunks together and return a new chunk
@@ -353,24 +351,24 @@ struct chunk * join(struct chunk * l, struct chunk * r)
 // coalesce a chunk with surrounding chunks
 // returns pointer to newly formed chunk
 static
-struct chunk * coalesce(struct chunk * chunk)
+struct chunk * coalesce(struct knuth * state, struct chunk * chunk)
 {
     // coalesce right
-    struct chunk * r = get_adj_next(chunk);
+    struct chunk * r = get_adj_next(state, chunk);
     while (r != NULL && r->size > 0) {
         // if free, remove the adjacent chunk from the list and join it
-        remove_free_chunk(r);
+        remove_free_chunk(state, r);
         chunk = join(chunk, r);
-        r = get_adj_next(chunk);
+        r = get_adj_next(state, chunk);
     }
 
     // coalesce left
-    struct chunk * l = get_adj_prev(chunk);
+    struct chunk * l = get_adj_prev(state, chunk);
     while (l != NULL && l->size > 0) {
         // if free, remove the adjacent chunk from the list and join it
-        remove_free_chunk(l);
+        remove_free_chunk(state, l);
         chunk = join(l, chunk);
-        l = get_adj_prev(chunk);
+        l = get_adj_prev(state, chunk);
     }
 
     return chunk;
@@ -378,23 +376,23 @@ struct chunk * coalesce(struct chunk * chunk)
 
 // returns the potential size if a coalesce happens with a chunk
 static
-uint32_t coalesce_probe(struct chunk * chunk)
+uint32_t coalesce_probe(struct knuth * state, struct chunk * chunk)
 {
     // measure the total space
     uint32_t space = chunk_space(chunk);
 
     // right
-    struct chunk * r = get_adj_next(chunk);
+    struct chunk * r = get_adj_next(state, chunk);
     while (r != NULL && r->size > 0) {
         space += chunk_space(r);
-        r = get_adj_next(r);
+        r = get_adj_next(state, r);
     }
 
     // left
-    struct chunk * l = get_adj_prev(chunk);
+    struct chunk * l = get_adj_prev(state, chunk);
     while (l != NULL && l->size > 0) {
         space += chunk_space(l);
-        l = get_adj_prev(l);
+        l = get_adj_prev(state, l);
     }
 
     return space;
@@ -420,16 +418,16 @@ void transfer(uint32_t * dst, uint32_t * src, int32_t n)
 
 // deallocates a chunk, coalescing it if possible
 static
-void deallocate(struct chunk * chunk)
+void deallocate(struct knuth * state, struct chunk * chunk)
 {
     // see if we can coalesce this chunk with surrounding chunks
     set_size(chunk, abs(chunk->size));
-    chunk = coalesce(chunk);
-    add_free_chunk(chunk);
+    chunk = coalesce(state, chunk);
+    add_free_chunk(state, chunk);
 }
 
 static
-struct chunk * reallocate(struct chunk * chunk, size_t byte_size)
+struct chunk * reallocate(struct knuth * state, struct chunk * chunk, size_t byte_size)
 {
     uint32_t size = round_up(byte_size);
     // 3 cases
@@ -448,57 +446,57 @@ struct chunk * reallocate(struct chunk * chunk, size_t byte_size)
     uint32_t * dst = NULL;
 
     // case 2
-    if (coalesce_probe(chunk) - 2 >= size) {
+    if (coalesce_probe(state, chunk) - 2 >= size) {
         // perform the coalesce, then transfer the data
         // coalesce() only messes with headers and footers: safe for transfer
         // allocate_chunk() can break up the chunk
         // since join() assumes that chunks are free, make the size positive
         set_size(chunk, abs(chunk->size));
-        chunk = coalesce(chunk);
-        chunk = allocate_chunk(chunk, byte_size, 0);
+        chunk = coalesce(state, chunk);
+        chunk = allocate_chunk(state, chunk, byte_size, 0);
         dst = (uint32_t *) get_ptr(chunk);
         transfer(dst, src, num_words);
         return chunk;
     }
 
     // case 3
-    struct chunk * new_chunk = alloc(byte_size, 0);
+    struct chunk * new_chunk = alloc(state, byte_size, 0);
     if (new_chunk == NULL)
         return NULL;
     dst = (uint32_t *) get_ptr(new_chunk);
     transfer(dst, src, num_words);
-    deallocate(chunk);
+    deallocate(state, chunk);
 
     return new_chunk;
 }
 
-void knuth_init(void * buff, size_t buff_size)
+void knuth_init(struct knuth * state, void * buff, size_t buff_size)
 {
-    buffer = (int32_t *) buff;
-    buffer_bytes = buff_size;
+    state->buffer = (int32_t *) buff;
+    state->buffer_bytes = buff_size;
 
     // setup the initial chunk
-    struct chunk * init = (struct chunk *) buffer;
-    init->size = (int32_t) round_up(buffer_bytes) - 2;
+    struct chunk * init = (struct chunk *) state->buffer;
+    init->size = (int32_t) round_up(state->buffer_bytes) - 2;
     init->next = NIL;
     init->prev = NIL;
     set_footer(init, init->size);
 
     // add it to the free list
-    base = get_offset(init);
+    state->base = get_offset(state, init);
 }
 
-void * knuth_malloc(size_t size)
+void * knuth_malloc(struct knuth * state, size_t size)
 {
-    return get_ptr(alloc(size, 0));
+    return get_ptr(alloc(state, size, 0));
 }
 
-void * knuth_calloc(size_t nmemb, size_t size)
+void * knuth_calloc(struct knuth * state, size_t nmemb, size_t size)
 {
-    return get_ptr(alloc(nmemb * size, 1));
+    return get_ptr(alloc(state, nmemb * size, 1));
 }
 
-void knuth_free(void * ptr)
+void knuth_free(struct knuth * state, void * ptr)
 {
     if (ptr == NULL)
         return;
@@ -515,18 +513,18 @@ void knuth_free(void * ptr)
         // ... or do some form of assertion fail
     }
 
-    deallocate(chunk);
+    deallocate(state, chunk);
 }
 
-void * knuth_realloc(void * ptr, size_t size)
+void * knuth_realloc(struct knuth * state, void * ptr, size_t size)
 {
     // defined: realloc with NULL ptr is a malloc
     if (ptr == NULL)
-        return knuth_malloc(size);
+        return knuth_malloc(state, size);
 
     // defined: realloc with size 0 is a free
     if (size == 0) {
-        knuth_free(ptr);
+        knuth_free(state, ptr);
         return NULL;
     }
 
@@ -542,5 +540,5 @@ void * knuth_realloc(void * ptr, size_t size)
         // ... or do some form of assertion fail
     }
 
-    return get_ptr(reallocate(chunk, size));
+    return get_ptr(reallocate(state, chunk, size));
 }
