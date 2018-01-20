@@ -176,7 +176,8 @@ struct chunk * get_adj_next(struct knuth * state, struct chunk * chunk)
     struct chunk * adj = (struct chunk *) (get_footer(chunk) + 1);
 
     // boundary check
-    if (adj >= (((uint8_t *) state->buffer) + state->buffer_bytes))
+    if ((void *) adj >=
+        (void *) (((uint8_t *) state->buffer) + state->buffer_bytes))
         return NULL;
     return adj;
 }
@@ -187,7 +188,7 @@ struct chunk * get_adj_prev(struct knuth * state, struct chunk * chunk)
 {
     int32_t * prev_foot = (int32_t *) (&(chunk->size) - 1);
     struct chunk * adj = from_footer(prev_foot);
-    if (adj < state->buffer)
+    if ((void *) adj < (void *) state->buffer)
         return NULL;
     return adj;
 }
@@ -326,7 +327,7 @@ struct chunk * allocate_chunk(struct knuth * state, struct chunk * chunk, size_t
 // finds best chunk and allocates it
 // returns the chunk
 static
-struct chunk * alloc(struct knuth * state, size_t n, int clear)
+struct chunk * allocate(struct knuth * state, size_t n, int clear)
 {
     if (n == 0)
         return NULL;
@@ -436,7 +437,7 @@ struct chunk * reallocate(struct knuth * state, struct chunk * chunk, size_t byt
     // 3: otherwise, we need to find a new chunk
 
     // case 1
-    if (abs(chunk->size) >= size) {
+    if ((uint32_t) abs(chunk->size) >= size) {
         return chunk;
     }
 
@@ -460,7 +461,7 @@ struct chunk * reallocate(struct knuth * state, struct chunk * chunk, size_t byt
     }
 
     // case 3
-    struct chunk * new_chunk = alloc(state, byte_size, 0);
+    struct chunk * new_chunk = allocate(state, byte_size, 0);
     if (new_chunk == NULL)
         return NULL;
     dst = (uint32_t *) get_ptr(new_chunk);
@@ -472,7 +473,7 @@ struct chunk * reallocate(struct knuth * state, struct chunk * chunk, size_t byt
 
 void knuth_init(struct knuth * state, void * buff, size_t buff_size)
 {
-    state->buffer = (int32_t *) buff;
+    state->buffer = (uint32_t *) buff;
     state->buffer_bytes = buff_size;
 
     // setup the initial chunk
@@ -488,12 +489,12 @@ void knuth_init(struct knuth * state, void * buff, size_t buff_size)
 
 void * knuth_malloc(struct knuth * state, size_t size)
 {
-    return get_ptr(alloc(state, size, 0));
+    return get_ptr(allocate(state, size, 0));
 }
 
 void * knuth_calloc(struct knuth * state, size_t nmemb, size_t size)
 {
-    return get_ptr(alloc(state, nmemb * size, 1));
+    return get_ptr(allocate(state, nmemb * size, 1));
 }
 
 void knuth_free(struct knuth * state, void * ptr)
@@ -531,12 +532,12 @@ void * knuth_realloc(struct knuth * state, void * ptr, size_t size)
     // do a metadata check
     struct chunk * chunk = from_ptr(ptr);
     if (!check_meta(chunk)) {
-        return;
+        return NULL;
         // ... or do some form of assertion fail
     }
 
     if (chunk->size >= 0) {
-        return;
+        return NULL;
         // ... or do some form of assertion fail
     }
 
