@@ -44,7 +44,7 @@ struct chunk
 static inline
 uint32_t round_up(size_t byte_size)
 {
-    uint32_t size = (byte_size + (byte_size & 0x3)) >> 2;
+    uint32_t size = (byte_size + 0x3) >> 2;
     return size;
 }
 
@@ -285,8 +285,13 @@ int should_break_chunk(struct chunk * chunk, size_t byte_size)
 {
     // break the chunk if it can fit the desired amount of space and
     // can fit another chunk
-    return (chunk_space(chunk) >=
-            round_up(2*(sizeof(struct chunk) + sizeof(uint32_t)) + byte_size) - 2);
+
+    // needs to fit 2 chunks and required byte size, -2 for the links inside
+    // the data requested
+    size_t space_thresh = round_up(2*(sizeof(struct chunk) +
+                                      sizeof(uint32_t)) + byte_size)
+                          - 2;
+    return (chunk_space(chunk) >= space_thresh);
 }
 
 // applies the allocation to this chunk
@@ -332,16 +337,16 @@ struct chunk * allocate_chunk(struct knuth * state, struct chunk * chunk, size_t
 // finds best chunk and allocates it
 // returns the chunk
 static
-struct chunk * allocate(struct knuth * state, size_t n, int clear)
+struct chunk * allocate(struct knuth * state, size_t byte_size, int clear)
 {
-    if (n == 0)
+    if (byte_size == 0)
         return NULL;
-    struct chunk * chunk = find_best_chunk(state, n);
+    struct chunk * chunk = find_best_chunk(state, byte_size);
     if (chunk == NULL)
         return NULL;
     // take this chunk out of the free list
     remove_free_chunk(state, chunk);
-    return allocate_chunk(state, chunk, n, clear);
+    return allocate_chunk(state, chunk, byte_size, clear);
 }
 
 // joins to chunks together and return a new chunk
