@@ -48,24 +48,27 @@ std::string print_free_list(struct knuth * state, int * ret)
     std::stringstream sstream;
     static char buf[128];
 
-    struct chunk * curr = get_chunk(state, state->base);
-    struct chunk * prev = NULL;
     sprintf(buf, "Knuth free list::\n");
     sstream << buf;
-    while (curr != NULL) {
-        if (curr->size < 0) {
-            sprintf(buf, "%d: size = %d : ERROR\n\n", get_offset(state, curr), curr->size);
+
+    for (int i = 0; i < K_LIST_CLASSES; ++i) {
+        struct chunk * curr = get_chunk(state, state->lists[i]);
+        struct chunk * prev = NULL;
+        while (curr != NULL) {
+            if (curr->size < 0) {
+                sprintf(buf, "%d: size = %d : ERROR\n\n", get_offset(state, curr), curr->size);
+                sstream << buf;
+                *ret = 0;
+                return sstream.str();
+            }
+            sprintf(buf, "%d: size = %d\n", get_offset(state, curr), curr->size);
             sstream << buf;
-            *ret = 0;
-            return sstream.str();
-        }
-        sprintf(buf, "%d: size = %d\n", get_offset(state, curr), curr->size);
-        sstream << buf;
-        prev = curr;
-        curr = get_chunk(state, curr->next);
-        if (curr == prev) {
-            sprintf(buf, "%d: size = %d : ERROR - cycle detected", get_offset(state, curr), curr->size);
-            sstream << buf;
+            prev = curr;
+            curr = get_chunk(state, curr->next);
+            if (curr == prev) {
+                sprintf(buf, "%d: size = %d : ERROR - cycle detected", get_offset(state, curr), curr->size);
+                sstream << buf;
+            }
         }
     }
     sprintf(buf, "\n");

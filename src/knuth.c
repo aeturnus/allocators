@@ -193,39 +193,35 @@ struct chunk * get_adj_prev(struct knuth * state, struct chunk * chunk)
     return adj;
 }
 
-// find the best chunk for this
+// get the allocation class offset from chunk word size
+// precondition: size is >= 2
 static
-struct chunk * find_best_chunk(struct knuth * state, size_t byte_size)
+int alloc_class(int32_t size, int32_t power)
 {
-    if (state->base == NIL)
-        return NULL;
-
-    // round up the size
-    int32_t size = round_up(byte_size);
-
-    struct chunk * curr = get_chunk(state, state->base);
-    while (curr != NULL) {
-        if (curr->size >= size) {
-            return curr;
-        }
-        curr = get_next(state, curr);
+    uint32_t asize = abs(size);
+    uint32_t comp = (1 << power);
+    for (int i = 0; i < K_LIST_CLASSES; ++i) {
+        if (asize < comp)
+            return i;
+        comp <<= power;
     }
-    return curr;
+    return K_LIST_CLASSES - 1;
 }
 
 // remove chunk from the list
 static
-void remove_free_chunk(struct knuth * state, struct chunk * chunk)
+void remove_chunk_list(struct knuth * state, struct chunk * chunk,
+                       uint32_t * list)
 {
     struct chunk * prev = get_prev(state, chunk);
     struct chunk * next = get_next(state, chunk);
     if (prev == NULL && next == NULL) {
         // if there's nothing, base is now NIL
-        state->base = NIL;
+        *list = NIL;
         return;
     } else if (prev == NULL) {
-        // if prev is null, then next will be new base
-        state->base = chunk->next;
+        // if prev is null, then next will be new root
+        *list = chunk->next;
         next->prev = NIL;
     } else if (next == NULL) {
         // if next is null, then pass the NIL to prev
@@ -238,24 +234,25 @@ void remove_free_chunk(struct knuth * state, struct chunk * chunk)
 
 // adds chunk to free list: smallest to largest
 static
-void add_free_chunk(struct knuth * state, struct chunk * chunk)
+void add_chunk_list(struct knuth * state, struct chunk * chunk,
+                    uint32_t * list)
 {
-    if (state->base == NIL) {
-        state->base = get_offset(state, chunk);
+    if (*list == NIL) {
+        *list = get_offset(state, chunk);
         chunk->next = NIL;
         chunk->prev = NIL;
         return;
     }
 
-    struct chunk * curr = get_chunk(state, state->base);
+    struct chunk * curr = get_chunk(state, *list);
     struct chunk * prev = NULL;
     while (curr != NULL) {
         // if it's smaller than current, it goes there
         if (chunk->size < curr->size) {
             if (prev == NULL) {
-                // new base
-                state->base = get_offset(state, chunk);
-                curr->prev = state->base;
+                // new root
+                *list = get_offset(state, chunk);
+                curr->prev = *list;
                 chunk->next = get_offset(state, curr);
                 chunk->prev = NIL;
                 return;
@@ -277,6 +274,45 @@ void add_free_chunk(struct knuth * state, struct chunk * chunk)
     prev->next  = get_offset(state, chunk);
     chunk->prev = get_offset(state, prev);
     chunk->next = NIL;
+}
+
+// find the best chunk for this
+static
+struct chunk * find_best_chunk(struct knuth * state, size_t byte_size)
+{
+    // round up the size
+    int32_t size = round_up(byte_size);
+    int space_class = alloc_class(size, state->power);
+
+    for (; space_class < K_LIST_CLASSES; ++space_class) {
+        if (state->lists[space_class] == NIL)
+            continue;
+
+        struct chunk * curr = get_chunk(state, state->lists[space_class]);
+        while (curr != NULL) {
+            if (curr->size >= size) {
+                return curr;
+            }
+            curr = get_next(state, curr);
+        }
+    }
+    return NULL;
+}
+
+// remove chunk from appropriate list
+static
+void remove_free_chunk(struct knuth * state, struct chunk * chunk)
+{
+    int space_class = alloc_class(chunk->size, state->power);
+    remove_chunk_list(state, chunk, &state->lists[space_class]);
+}
+
+// adds chunk to appropriate list
+static
+void add_free_chunk(struct knuth * state, struct chunk * chunk)
+{
+    int space_class = alloc_class(chunk->size, state->power);
+    add_chunk_list(state, chunk, &state->lists[space_class]);
 }
 
 // returns true if the chunk should be broken
@@ -488,10 +524,12 @@ struct chunk * reallocate(struct knuth * state, struct chunk * chunk, size_t byt
     return new_chunk;
 }
 
-void knuth_init(struct knuth * state, void * buff, size_t buff_size)
+void knuth_init(struct knuth * state, void * buff,
+                size_t buff_size, uint32_t power)
 {
     state->buffer = (uint32_t *) buff;
     state->buffer_bytes = buff_size;
+    state->power = power;
 
     // setup the initial chunk
     struct chunk * init = (struct chunk *) state->buffer;
@@ -501,7 +539,10 @@ void knuth_init(struct knuth * state, void * buff, size_t buff_size)
     set_footer(init, init->size);
 
     // add it to the free list
-    state->base = get_offset(state, init);
+    for (int i = 0; i <  K_LIST_CLASSES; ++i) {
+        state->lists[i] = NIL;
+    }
+    add_free_chunk(state, init);
 }
 
 void * knuth_malloc(struct knuth * state, size_t size)

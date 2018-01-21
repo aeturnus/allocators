@@ -27,7 +27,7 @@ TEST(knuth, init)
 {
     struct knuth state;
     static int32_t buffer[128];
-    knuth_init(&state, buffer, sizeof(buffer));
+    knuth_init(&state, buffer, sizeof(buffer), 2);
     ASSERT_EQ(126, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(126, buffer[127]) << pbuf(buffer);
 }
@@ -36,7 +36,7 @@ TEST(knuth, malloc_small)
 {
     struct knuth state;
     static int32_t buffer[8];
-    knuth_init(&state, buffer, sizeof(buffer));
+    knuth_init(&state, buffer, sizeof(buffer), 2);
     void * p = knuth_malloc(&state, 1);
     ASSERT_EQ(-2, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(-2, buffer[3]) << pbuf(buffer);
@@ -49,7 +49,7 @@ TEST(knuth, malloc_aligned)
 {
     struct knuth state;
     static int32_t buffer[32];
-    knuth_init(&state, buffer, sizeof(buffer));
+    knuth_init(&state, buffer, sizeof(buffer), 2);
     void * p = knuth_malloc(&state, 2 * 4);
     ASSERT_EQ(-2, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(-2, buffer[3]) << pbuf(buffer);
@@ -62,7 +62,7 @@ TEST(knuth, malloc_unaligned)
 {
     struct knuth state;
     static int32_t buffer[32];
-    knuth_init(&state, buffer, sizeof(buffer));
+    knuth_init(&state, buffer, sizeof(buffer), 2);
     void * p = knuth_malloc(&state, 2 * 4 + 2);
     ASSERT_EQ(-3, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(-3, buffer[4]) << pbuf(buffer);
@@ -75,7 +75,7 @@ TEST(knuth, calloc_aligned)
 {
     struct knuth state;
     static int32_t buffer[32];
-    knuth_init(&state, buffer, sizeof(buffer));
+    knuth_init(&state, buffer, sizeof(buffer), 2);
     void * p = knuth_calloc(&state, sizeof(int32_t), 2);
     ASSERT_EQ(-2, buffer[0]) << pbuf(buffer);
     ASSERT_EQ( 0, buffer[1]) << pbuf(buffer);
@@ -88,7 +88,7 @@ TEST(knuth, calloc_unaligned)
 {
     struct knuth state;
     static int32_t buffer[32];
-    knuth_init(&state, buffer, sizeof(buffer));
+    knuth_init(&state, buffer, sizeof(buffer), 2);
     void * p = knuth_calloc(&state, sizeof(uint8_t), 2 * 4 + 2);
     ASSERT_EQ(-3, buffer[0]) << pbuf(buffer);
     ASSERT_EQ( 0, buffer[1]) << pbuf(buffer);
@@ -104,7 +104,7 @@ TEST(knuth, free)
 {
     struct knuth state;
     static int32_t buffer[16];
-    knuth_init(&state, buffer, sizeof(buffer));
+    knuth_init(&state, buffer, sizeof(buffer), 2);
     void * p = knuth_malloc(&state, 2 * 4);
     ASSERT_EQ(-2, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(-2, buffer[3]) << pbuf(buffer);
@@ -120,7 +120,7 @@ TEST(knuth, free_coalesce)
 {
     struct knuth state;
     static int32_t buffer[20];
-    knuth_init(&state, buffer, sizeof(buffer));
+    knuth_init(&state, buffer, sizeof(buffer), 2);
     void * ptrs[5];
     for (int i = 0; i < 5; ++i) {
         ptrs[i] = knuth_malloc(&state, sizeof(int32_t) * 2);
@@ -141,7 +141,7 @@ TEST(knuth, realloc_same)
 {
     struct knuth state;
     static int32_t buffer[8];
-    knuth_init(&state, buffer, sizeof(buffer));
+    knuth_init(&state, buffer, sizeof(buffer), 2);
     const char * expect = "0123456789";
     char * str = (char *) knuth_malloc(&state, sizeof(char) * (strlen(expect) + 1));
     strcpy(str, expect);
@@ -154,7 +154,7 @@ TEST(knuth, realloc_coalesce)
 {
     struct knuth state;
     static int32_t buffer[20];
-    knuth_init(&state, buffer, sizeof(buffer));
+    knuth_init(&state, buffer, sizeof(buffer), 2);
     void * ptrs[5];
     for (int i = 0; i < 5; ++i) {
         ptrs[i] = knuth_malloc(&state, sizeof(int32_t) * 2);
@@ -179,7 +179,7 @@ TEST(knuth, realloc_new)
 {
     struct knuth state;
     static int32_t buffer[20];
-    knuth_init(&state, buffer, sizeof(buffer));
+    knuth_init(&state, buffer, sizeof(buffer), 2);
     void * ptrs[5];
     for (int i = 0; i < 5; ++i) {
         ptrs[i] = knuth_malloc(&state, sizeof(int32_t) * 2);
@@ -211,7 +211,7 @@ TEST(knuth, many_allocs)
     constexpr int SIZE = 32;
     */
     static int32_t buffer[NUM_WORDS];
-    knuth_init(&state, buffer, sizeof(buffer));
+    knuth_init(&state, buffer, sizeof(buffer), 2);
     std::set<void *> ptrs;
 
     ASSERT_EQ(NUM_WORDS - 2, buffer[0]);
@@ -254,7 +254,7 @@ TEST(knuth, many_allocs_and_frees)
     constexpr int ACTIONS = 128;
     */
     static int32_t buffer[NUM_WORDS];
-    knuth_init(&state, buffer, sizeof(buffer));
+    knuth_init(&state, buffer, sizeof(buffer), 2);
     std::set<void *> ptrs;
 
     ASSERT_EQ(NUM_WORDS - 2, buffer[0]);
