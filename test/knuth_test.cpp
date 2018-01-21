@@ -7,7 +7,6 @@
 #include <set>
 
 #include <gtest/gtest.h>
-
 #include <knuth.h>
 
 std::string print_buffer(int32_t * buffer, size_t num)
@@ -21,6 +20,8 @@ std::string print_buffer(int32_t * buffer, size_t num)
     return sstream.str();
 }
 #define pbuf(buffer) print_buffer(buffer, sizeof(buffer)/sizeof(buffer[0]))
+
+extern std::string print_free_list(struct knuth * state, int * ret);
 
 TEST(knuth, init)
 {
@@ -201,10 +202,12 @@ TEST(knuth, realloc_new)
 TEST(knuth, many_allocs)
 {
     struct knuth state;
-    #define NUM_WORDS 1024 * 1024
-    #define SIZE 128
-    //#define NUM_WORDS 128
-    //#define SIZE 32
+    constexpr int NUM_WORDS = 1024 * 1024;
+    constexpr int SIZE = 128;
+    /*
+    constexpr int NUM_WORDS = 128;
+    constexpr int SIZE = 32;
+    */
     static int32_t buffer[NUM_WORDS];
     knuth_init(&state, buffer, sizeof(buffer));
     std::set<void *> ptrs;
@@ -225,6 +228,68 @@ TEST(knuth, many_allocs)
         knuth_free(&state, ptr);
         --count;
     }
+
+    ASSERT_EQ(0, count) << pbuf(buffer);
+    ASSERT_EQ(NUM_WORDS - 2, buffer[0]) << pbuf(buffer);
+    ASSERT_EQ(NUM_WORDS - 2, buffer[NUM_WORDS - 1]) << pbuf(buffer);
+}
+
+TEST(knuth, many_allocs_and_frees)
+{
+    struct knuth state;
+    ///*
+    constexpr int NUM_WORDS = 1024 * 1024;
+    constexpr int SIZE = 128;
+    constexpr int ACTIONS = 4096;
+    //*/
+    /*
+    constexpr int NUM_WORDS = 128;
+    constexpr int SIZE = 32;
+    constexpr int ACTIONS = 128;
+    */
+    static int32_t buffer[NUM_WORDS];
+    knuth_init(&state, buffer, sizeof(buffer));
+    std::set<void *> ptrs;
+
+    ASSERT_EQ(NUM_WORDS - 2, buffer[0]);
+    ASSERT_EQ(NUM_WORDS - 2, buffer[NUM_WORDS - 1]);
+
+    srand(0);
+    void * ptr = NULL;
+
+    size_t count = 0;
+    for (int i = 0; i < ACTIONS; ++i) {
+        //std::cout << "i = " << i << std::endl;
+        int r = rand() % 2;
+        if (r == 0 || ptrs.empty()) {
+            // malloc random amount
+            ptr = knuth_malloc(&state, rand() % SIZE);
+            if (ptr != NULL) {
+                ptrs.insert(ptr);
+                ++count;
+                //std::cout << "Action: malloc" << std::endl;
+            }
+        } else {
+            // free random ptr
+            std::set<void *>::iterator it = ptrs.begin();
+            std::advance(it, rand() % ptrs.size());
+            ptr = *it;
+            ptrs.erase(ptr);
+            knuth_free(&state, ptr);
+            --count;
+            //std::cout << "Action: free" << std::endl;
+        }
+        int ret = 1;
+        //std::cout << print_free_list(&state, &ret) << std::endl;
+        ASSERT_EQ(1, ret);
+        //ASSERT_EQ(1, knuth_print_free(&state));
+    }
+
+    for (void * ptr : ptrs) {
+        knuth_free(&state, ptr);
+        --count;
+    }
+    ptrs.clear();
 
     ASSERT_EQ(0, count) << pbuf(buffer);
     ASSERT_EQ(NUM_WORDS - 2, buffer[0]) << pbuf(buffer);
