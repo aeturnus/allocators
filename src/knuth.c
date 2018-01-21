@@ -257,6 +257,7 @@ void add_free_chunk(struct knuth * state, struct chunk * chunk)
                 state->base = get_offset(state, chunk);
                 curr->prev = state->base;
                 chunk->next = get_offset(state, curr);
+                chunk->prev = NIL;
                 return;
             } else {
                 // insert behind curr
@@ -278,21 +279,27 @@ void add_free_chunk(struct knuth * state, struct chunk * chunk)
     chunk->next = NIL;
 }
 
+// returns true if the chunk should be broken
+static inline
+int should_break_chunk(struct chunk * chunk, size_t byte_size)
+{
+    // break the chunk if it can fit the desired amount of space and
+    // can fit another chunk
+    return (chunk_space(chunk) >=
+            round_up(2*(sizeof(struct chunk) + sizeof(uint32_t)) + byte_size) - 2);
+}
+
 // applies the allocation to this chunk
 // may break the the chunk up
 static
 struct chunk * allocate_chunk(struct knuth * state, struct chunk * chunk, size_t byte_size, int clear)
 {
-    // take this chunk out of the free list
-    remove_free_chunk(state, chunk);
-
     // determine if chunk should be broken
     // break if we can fit another allocation chunk in all of this
-    if (to_bytes(chunk->size + 2) >=
-        sizeof(struct chunk) + sizeof(uint32_t) + byte_size) {
+    if (should_break_chunk(chunk, byte_size)) {
         // break
+        int32_t size = round_up(byte_size);
         uint32_t available_space = chunk_space(chunk) - 4;
-        uint32_t size = round_up(byte_size);
         if (size < 2)
             size = 2;
 
@@ -332,6 +339,8 @@ struct chunk * allocate(struct knuth * state, size_t n, int clear)
     struct chunk * chunk = find_best_chunk(state, n);
     if (chunk == NULL)
         return NULL;
+    // take this chunk out of the free list
+    remove_free_chunk(state, chunk);
     return allocate_chunk(state, chunk, n, clear);
 }
 
