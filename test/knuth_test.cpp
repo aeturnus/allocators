@@ -245,7 +245,7 @@ TEST(knuth, many_allocs_and_frees)
     struct knuth state;
     ///*
     constexpr int NUM_WORDS = 1024 * 1024;
-    constexpr int SIZE = 128;
+    constexpr int SIZE = 4096;
     constexpr int ACTIONS = 1 << 16;
     //*/
     /*

@@ -288,9 +288,13 @@ int should_break_chunk(struct chunk * chunk, size_t byte_size)
 
     // needs to fit 2 chunks and required byte size, -2 for the links inside
     // the data requested
+    uint32_t size = round_up(byte_size);
+    if (size < 2)
+        size = 2;
+
     size_t space_thresh = round_up(2*(sizeof(struct chunk) +
-                                      sizeof(uint32_t)) + byte_size)
-                          - 2;
+                                      sizeof(uint32_t)))
+                          + size - 2;
     return (chunk_space(chunk) >= space_thresh);
 }
 
@@ -304,9 +308,10 @@ struct chunk * allocate_chunk(struct knuth * state, struct chunk * chunk, size_t
     if (should_break_chunk(chunk, byte_size)) {
         // break
         int32_t size = round_up(byte_size);
-        uint32_t available_space = chunk_space(chunk) - 4;
         if (size < 2)
             size = 2;
+
+        uint32_t available_space = chunk_space(chunk) - 4;
 
         // resize the original chunk
         set_size(chunk, size);
