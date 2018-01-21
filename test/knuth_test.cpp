@@ -199,6 +199,8 @@ TEST(knuth, realloc_new)
     ASSERT_EQ(-3, buffer[4]) << pbuf(buffer);
 }
 
+#define max(x,y) ((x > y) ? x : y)
+
 TEST(knuth, many_allocs)
 {
     struct knuth state;
@@ -219,7 +221,7 @@ TEST(knuth, many_allocs)
     void * ptr = NULL;
     size_t count = 0;
     do {
-        ptr = knuth_malloc(&state, rand() % SIZE);
+        ptr = knuth_malloc(&state, max(rand() % SIZE, 1));
         ptrs.insert(ptr);
         ++count;
     } while (ptr != NULL);
@@ -229,10 +231,14 @@ TEST(knuth, many_allocs)
         --count;
     }
 
+    // check that we've completely freed all pointers
+    // at this point, should have coalesced back into one big chunk
     ASSERT_EQ(0, count) << pbuf(buffer);
     ASSERT_EQ(NUM_WORDS - 2, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(NUM_WORDS - 2, buffer[NUM_WORDS - 1]) << pbuf(buffer);
 }
+
+//#define PRINT_FREE_LIST
 
 TEST(knuth, many_allocs_and_frees)
 {
@@ -240,7 +246,7 @@ TEST(knuth, many_allocs_and_frees)
     ///*
     constexpr int NUM_WORDS = 1024 * 1024;
     constexpr int SIZE = 128;
-    constexpr int ACTIONS = 4096;
+    constexpr int ACTIONS = 1 << 16;
     //*/
     /*
     constexpr int NUM_WORDS = 128;
@@ -259,15 +265,19 @@ TEST(knuth, many_allocs_and_frees)
 
     size_t count = 0;
     for (int i = 0; i < ACTIONS; ++i) {
-        //std::cout << "i = " << i << std::endl;
+        #ifdef PRINT_FREE_LIST
+        std::cout << "i = " << i << std::endl;
+        #endif
         int r = rand() % 2;
         if (r == 0 || ptrs.empty()) {
             // malloc random amount
-            ptr = knuth_malloc(&state, rand() % SIZE);
+            ptr = knuth_malloc(&state, max(rand() % SIZE, 1));
             if (ptr != NULL) {
                 ptrs.insert(ptr);
                 ++count;
-                //std::cout << "Action: malloc" << std::endl;
+                #ifdef PRINT_FREE_LIST
+                std::cout << "Action: malloc" << std::endl;
+                #endif
             }
         } else {
             // free random ptr
@@ -277,12 +287,15 @@ TEST(knuth, many_allocs_and_frees)
             ptrs.erase(ptr);
             knuth_free(&state, ptr);
             --count;
-            //std::cout << "Action: free" << std::endl;
+            #ifdef PRINT_FREE_LIST
+            std::cout << "Action: free" << std::endl;
+            #endif
         }
+        #ifdef PRINT_FREE_LIST
         int ret = 1;
-        //std::cout << print_free_list(&state, &ret) << std::endl;
+        std::cout << print_free_list(&state, &ret) << std::endl;
         ASSERT_EQ(1, ret);
-        //ASSERT_EQ(1, knuth_print_free(&state));
+        #endif
     }
 
     for (void * ptr : ptrs) {
@@ -291,6 +304,8 @@ TEST(knuth, many_allocs_and_frees)
     }
     ptrs.clear();
 
+    // check that we've completely freed all pointers
+    // at this point, should have coalesced back into one big chunk
     ASSERT_EQ(0, count) << pbuf(buffer);
     ASSERT_EQ(NUM_WORDS - 2, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(NUM_WORDS - 2, buffer[NUM_WORDS - 1]) << pbuf(buffer);

@@ -43,7 +43,6 @@ uint32_t get_offset(struct knuth * state, struct chunk * chunk)
     return off;
 }
 
-static
 std::string print_free_list(struct knuth * state, int * ret)
 {
     std::stringstream sstream;
