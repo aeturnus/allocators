@@ -150,7 +150,8 @@ TEST(knuth, realloc_same)
     ASSERT_STREQ(expect, new_str);
 }
 
-TEST(knuth, realloc_coalesce)
+// coalesce to the right, in place
+TEST(knuth, realloc_coalesce_r)
 {
     struct knuth state;
     static int32_t buffer[20];
@@ -168,11 +169,35 @@ TEST(knuth, realloc_coalesce)
     knuth_free(&state, ptrs[3]);
     char * new_str = (char *) knuth_realloc(&state, ptrs[2], 12);
 
+    ASSERT_EQ(ptrs[2], new_str) << pbuf(buffer);
+    ASSERT_STREQ(expect, new_str) << pbuf(buffer);
+    ASSERT_EQ(-3, buffer[8]) << pbuf(buffer);
+    ASSERT_EQ(-3, buffer[12]) << pbuf(buffer);
+}
+
+TEST(knuth, realloc_coalesce)
+{
+    struct knuth state;
+    static int32_t buffer[20];
+    knuth_init(&state, buffer, sizeof(buffer), 2);
+    void * ptrs[5];
+    for (int i = 0; i < 5; ++i) {
+        ptrs[i] = knuth_malloc(&state, sizeof(int32_t) * 2);
+    }
+
+    const char * expect = "hello";
+    strcpy((char *)ptrs[2], expect);
+    knuth_free(&state, ptrs[0]);
+    knuth_free(&state, ptrs[4]);
+    knuth_free(&state, ptrs[1]);
+    knuth_free(&state, ptrs[3]);
+    char * new_str = (char *) knuth_realloc(&state, ptrs[2], sizeof(int32_t) * 18);
+
     // coalesce should've placed this pointer where ptrs[0] is
     ASSERT_EQ(ptrs[0], new_str) << pbuf(buffer);
     ASSERT_STREQ(expect, new_str) << pbuf(buffer);
-    ASSERT_EQ(-3, buffer[0]) << pbuf(buffer);
-    ASSERT_EQ(-3, buffer[4]) << pbuf(buffer);
+    ASSERT_EQ(-18, buffer[0]) << pbuf(buffer);
+    ASSERT_EQ(-18, buffer[19]) << pbuf(buffer);
 }
 
 TEST(knuth, realloc_new)
@@ -307,6 +332,30 @@ TEST(knuth, many_allocs_and_frees)
     // check that we've completely freed all pointers
     // at this point, should have coalesced back into one big chunk
     ASSERT_EQ(0, count) << pbuf(buffer);
+    ASSERT_EQ(NUM_WORDS - 2, buffer[0]) << pbuf(buffer);
+    ASSERT_EQ(NUM_WORDS - 2, buffer[NUM_WORDS - 1]) << pbuf(buffer);
+}
+
+TEST(knuth, many_reallocs)
+{
+    struct knuth state;
+    constexpr int NUM_WORDS = 1024 * 1024;
+    static int32_t buffer[NUM_WORDS];
+    knuth_init(&state, buffer, sizeof(buffer), 2);
+
+    const char * expect = "hello";
+
+    char * str = (char *) knuth_malloc(&state, 6);
+    strcpy(str, expect);
+    ASSERT_STREQ(expect, str);
+
+    for (int i = 0; i < (NUM_WORDS-10) / 10; ++i) {
+        str = (char *) knuth_realloc(&state, str, 10 * (i + 1));
+        ASSERT_STREQ(expect, str) << "Failed at iteration " << i;
+    }
+
+    knuth_free(&state, str);
+
     ASSERT_EQ(NUM_WORDS - 2, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(NUM_WORDS - 2, buffer[NUM_WORDS - 1]) << pbuf(buffer);
 }

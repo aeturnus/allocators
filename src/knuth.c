@@ -404,49 +404,59 @@ struct chunk * join(struct chunk * l, struct chunk * r)
 
 // coalesce a chunk with surrounding chunks
 // returns pointer to newly formed chunk
+#define COAL_L 0x1
+#define COAL_R 0x2
 static
-struct chunk * coalesce(struct knuth * state, struct chunk * chunk)
+struct chunk * coalesce(struct knuth * state, struct chunk * chunk, int dir)
 {
     // coalesce right
-    struct chunk * r = get_adj_next(state, chunk);
-    while (r != NULL && r->size > 0) {
-        // if free, remove the adjacent chunk from the list and join it
-        remove_free_chunk(state, r);
-        chunk = join(chunk, r);
-        r = get_adj_next(state, chunk);
+    if ((dir & COAL_R) != 0) {
+        struct chunk * r = get_adj_next(state, chunk);
+        while (r != NULL && r->size > 0) {
+            // if free, remove the adjacent chunk from the list and join it
+            remove_free_chunk(state, r);
+            chunk = join(chunk, r);
+            r = get_adj_next(state, chunk);
+        }
     }
 
     // coalesce left
-    struct chunk * l = get_adj_prev(state, chunk);
-    while (l != NULL && l->size > 0) {
-        // if free, remove the adjacent chunk from the list and join it
-        remove_free_chunk(state, l);
-        chunk = join(l, chunk);
-        l = get_adj_prev(state, chunk);
+    if ((dir & COAL_L) != 0) {
+        struct chunk * l = get_adj_prev(state, chunk);
+        while (l != NULL && l->size > 0) {
+            // if free, remove the adjacent chunk from the list and join it
+            remove_free_chunk(state, l);
+            chunk = join(l, chunk);
+            l = get_adj_prev(state, chunk);
+        }
     }
 
     return chunk;
 }
 
-// returns the potential size if a coalesce happens with a chunk
+// returns the potential space if a coalesce happens with a chunk
 static
-uint32_t coalesce_probe(struct knuth * state, struct chunk * chunk)
+uint32_t coalesce_probe(struct knuth * state, struct chunk * chunk, int dir)
 {
     // measure the total space
     uint32_t space = chunk_space(chunk);
 
     // right
-    struct chunk * r = get_adj_next(state, chunk);
-    while (r != NULL && r->size > 0) {
-        space += chunk_space(r);
-        r = get_adj_next(state, r);
+    if ((dir & COAL_R) != 0) {
+        struct chunk * r = get_adj_next(state, chunk);
+        while (r != NULL && r->size > 0) {
+            space += chunk_space(r);
+            r = get_adj_next(state, r);
+        }
     }
 
     // left
-    struct chunk * l = get_adj_prev(state, chunk);
-    while (l != NULL && l->size > 0) {
-        space += chunk_space(l);
-        l = get_adj_prev(state, l);
+    if ((dir & COAL_L) != 0) {
+        struct chunk * l = get_adj_prev(state, chunk);
+        while (l != NULL && l->size > 0) {
+            space += chunk_space(l);
+            l = get_adj_prev(state, l);
+        }
     }
 
     return space;
@@ -476,7 +486,7 @@ void deallocate(struct knuth * state, struct chunk * chunk)
 {
     // see if we can coalesce this chunk with surrounding chunks
     set_size(chunk, abs(chunk->size));
-    chunk = coalesce(state, chunk);
+    chunk = coalesce(state, chunk, COAL_L | COAL_R);
     add_free_chunk(state, chunk);
 }
 
@@ -484,9 +494,10 @@ static
 struct chunk * reallocate(struct knuth * state, struct chunk * chunk, size_t byte_size)
 {
     uint32_t size = round_up(byte_size);
-    // 3 cases
+    // 4 cases
     // 1: chunk is already of requested size
-    // 2: we can coalesce around this chunk
+    // 2: we can coalesce to the right of this chunk, skipping transfer
+    // 3: we can coalesce around this chunk
     // 3: otherwise, we need to find a new chunk
 
     // case 1
@@ -500,20 +511,32 @@ struct chunk * reallocate(struct knuth * state, struct chunk * chunk, size_t byt
     uint32_t * dst = NULL;
 
     // case 2
-    if (coalesce_probe(state, chunk) - 2 >= size) {
+    uint32_t coal_space = coalesce_probe(state, chunk, COAL_R) - 2;
+    if (coal_space >= size) {
+        // perform the coalesce-right
+        set_size(chunk, abs(chunk->size));
+        chunk = coalesce(state, chunk, COAL_R);
+        chunk = allocate_chunk(state, chunk, byte_size, 0);
+        return chunk;
+    }
+
+    // case 3
+    // don't double count the chunk
+    coal_space += coalesce_probe(state, chunk, COAL_L) - chunk_space(chunk);
+    if (coal_space >= size) {
         // perform the coalesce, then transfer the data
         // coalesce() only messes with headers and footers: safe for transfer
         // allocate_chunk() can break up the chunk
         // since join() assumes that chunks are free, make the size positive
         set_size(chunk, abs(chunk->size));
-        chunk = coalesce(state, chunk);
+        chunk = coalesce(state, chunk, COAL_L | COAL_R);
         chunk = allocate_chunk(state, chunk, byte_size, 0);
         dst = (uint32_t *) get_ptr(chunk);
         transfer(dst, src, num_words);
         return chunk;
     }
 
-    // case 3
+    // case 4
     struct chunk * new_chunk = allocate(state, byte_size, 0);
     if (new_chunk == NULL)
         return NULL;
