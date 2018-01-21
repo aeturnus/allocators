@@ -187,9 +187,9 @@ static inline
 struct chunk * get_adj_prev(struct knuth * state, struct chunk * chunk)
 {
     int32_t * prev_foot = (int32_t *) (&(chunk->size) - 1);
-    struct chunk * adj = from_footer(prev_foot);
-    if ((void *) adj < (void *) state->buffer)
+    if ((void *) prev_foot < (void *) state->buffer)
         return NULL;
+    struct chunk * adj = from_footer(prev_foot);
     return adj;
 }
 
