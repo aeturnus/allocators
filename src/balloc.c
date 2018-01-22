@@ -1,9 +1,13 @@
 #include <stdint.h>
 #include <stddef.h>
-#include <knuth.h>
+#include <balloc.h>
 
 /**
- * Knuth heap allocator with links
+ * Brandon's memory allocator
+ *
+ * Basically a balloc heap allocator with links, using multiple free lists
+ * for different size classes.
+ *
  * Optimal use of this allocator is for things larger than 8 bytes. The larger,
  * the better
  *
@@ -63,7 +67,7 @@ size_t to_bytes(uint32_t size)
 
 // get the offset in the buffer of a chunk
 static inline
-uint32_t get_offset(struct knuth * state, struct chunk * chunk)
+uint32_t get_offset(struct balloc * state, struct chunk * chunk)
 {
     if (chunk == NULL)
         return NIL;
@@ -75,7 +79,7 @@ uint32_t get_offset(struct knuth * state, struct chunk * chunk)
 
 // offset into the buffer to get the chunk pointer
 static inline
-struct chunk * get_chunk(struct knuth * state, uint32_t offset)
+struct chunk * get_chunk(struct balloc * state, uint32_t offset)
 {
     if (offset == NIL)
         return NULL;
@@ -153,7 +157,7 @@ struct chunk * from_footer(int32_t * foot)
 
 // traversal: follow next
 static inline
-struct chunk * get_next(struct knuth * state, struct chunk * chunk)
+struct chunk * get_next(struct balloc * state, struct chunk * chunk)
 {
     if (chunk->next == NIL)
         return NULL;
@@ -162,7 +166,7 @@ struct chunk * get_next(struct knuth * state, struct chunk * chunk)
 
 // traversal: follow prev
 static inline
-struct chunk * get_prev(struct knuth * state, struct chunk * chunk)
+struct chunk * get_prev(struct balloc * state, struct chunk * chunk)
 {
     if (chunk->prev == NIL)
         return NULL;
@@ -171,7 +175,7 @@ struct chunk * get_prev(struct knuth * state, struct chunk * chunk)
 
 // traversal: get adjacent chunk after this one
 static inline
-struct chunk * get_adj_next(struct knuth * state, struct chunk * chunk)
+struct chunk * get_adj_next(struct balloc * state, struct chunk * chunk)
 {
     struct chunk * adj = (struct chunk *) (get_footer(chunk) + 1);
 
@@ -184,7 +188,7 @@ struct chunk * get_adj_next(struct knuth * state, struct chunk * chunk)
 
 // traversal: get adjacent chunk before this one
 static inline
-struct chunk * get_adj_prev(struct knuth * state, struct chunk * chunk)
+struct chunk * get_adj_prev(struct balloc * state, struct chunk * chunk)
 {
     int32_t * prev_foot = (int32_t *) (&(chunk->size) - 1);
     if ((void *) prev_foot < (void *) state->buffer)
@@ -200,17 +204,17 @@ int alloc_class(int32_t size, int32_t power)
 {
     uint32_t asize = abs(size);
     uint32_t comp = (1 << power);
-    for (int i = 0; i < K_LIST_CLASSES; ++i) {
+    for (int i = 0; i < BALLOC_LIST_CLASSES; ++i) {
         if (asize < comp)
             return i;
         comp <<= power;
     }
-    return K_LIST_CLASSES - 1;
+    return BALLOC_LIST_CLASSES - 1;
 }
 
 // remove chunk from the list
 static
-void remove_chunk_list(struct knuth * state, struct chunk * chunk,
+void remove_chunk_list(struct balloc * state, struct chunk * chunk,
                        uint32_t * list)
 {
     struct chunk * prev = get_prev(state, chunk);
@@ -234,7 +238,7 @@ void remove_chunk_list(struct knuth * state, struct chunk * chunk,
 
 // adds chunk to free list: smallest to largest
 static
-void add_chunk_list(struct knuth * state, struct chunk * chunk,
+void add_chunk_list(struct balloc * state, struct chunk * chunk,
                     uint32_t * list)
 {
     if (*list == NIL) {
@@ -278,13 +282,13 @@ void add_chunk_list(struct knuth * state, struct chunk * chunk,
 
 // find the best chunk for this
 static
-struct chunk * find_best_chunk(struct knuth * state, size_t byte_size)
+struct chunk * find_best_chunk(struct balloc * state, size_t byte_size)
 {
     // round up the size
     int32_t size = round_up(byte_size);
     int space_class = alloc_class(size, state->power);
 
-    for (; space_class < K_LIST_CLASSES; ++space_class) {
+    for (; space_class < BALLOC_LIST_CLASSES; ++space_class) {
         if (state->lists[space_class] == NIL)
             continue;
 
@@ -301,7 +305,7 @@ struct chunk * find_best_chunk(struct knuth * state, size_t byte_size)
 
 // remove chunk from appropriate list
 static
-void remove_free_chunk(struct knuth * state, struct chunk * chunk)
+void remove_free_chunk(struct balloc * state, struct chunk * chunk)
 {
     int space_class = alloc_class(chunk->size, state->power);
     remove_chunk_list(state, chunk, &state->lists[space_class]);
@@ -309,7 +313,7 @@ void remove_free_chunk(struct knuth * state, struct chunk * chunk)
 
 // adds chunk to appropriate list
 static
-void add_free_chunk(struct knuth * state, struct chunk * chunk)
+void add_free_chunk(struct balloc * state, struct chunk * chunk)
 {
     int space_class = alloc_class(chunk->size, state->power);
     add_chunk_list(state, chunk, &state->lists[space_class]);
@@ -337,7 +341,7 @@ int should_break_chunk(struct chunk * chunk, size_t byte_size)
 // applies the allocation to this chunk
 // may break the the chunk up
 static
-struct chunk * allocate_chunk(struct knuth * state, struct chunk * chunk, size_t byte_size, int clear)
+struct chunk * allocate_chunk(struct balloc * state, struct chunk * chunk, size_t byte_size, int clear)
 {
     // determine if chunk should be broken
     // break if we can fit another allocation chunk in all of this
@@ -378,7 +382,7 @@ struct chunk * allocate_chunk(struct knuth * state, struct chunk * chunk, size_t
 // finds best chunk and allocates it
 // returns the chunk
 static
-struct chunk * allocate(struct knuth * state, size_t byte_size, int clear)
+struct chunk * allocate(struct balloc * state, size_t byte_size, int clear)
 {
     if (byte_size == 0)
         return NULL;
@@ -407,7 +411,7 @@ struct chunk * join(struct chunk * l, struct chunk * r)
 #define COAL_L 0x1
 #define COAL_R 0x2
 static
-struct chunk * coalesce(struct knuth * state, struct chunk * chunk, int dir)
+struct chunk * coalesce(struct balloc * state, struct chunk * chunk, int dir)
 {
     // coalesce right
     if ((dir & COAL_R) != 0) {
@@ -436,7 +440,7 @@ struct chunk * coalesce(struct knuth * state, struct chunk * chunk, int dir)
 
 // returns the potential space if a coalesce happens with a chunk
 static
-uint32_t coalesce_probe(struct knuth * state, struct chunk * chunk, int dir)
+uint32_t coalesce_probe(struct balloc * state, struct chunk * chunk, int dir)
 {
     // measure the total space
     uint32_t space = chunk_space(chunk);
@@ -482,7 +486,7 @@ void transfer(uint32_t * dst, uint32_t * src, int32_t n)
 
 // deallocates a chunk, coalescing it if possible
 static
-void deallocate(struct knuth * state, struct chunk * chunk)
+void deallocate(struct balloc * state, struct chunk * chunk)
 {
     // see if we can coalesce this chunk with surrounding chunks
     set_size(chunk, abs(chunk->size));
@@ -491,7 +495,7 @@ void deallocate(struct knuth * state, struct chunk * chunk)
 }
 
 static
-struct chunk * reallocate(struct knuth * state, struct chunk * chunk, size_t byte_size)
+struct chunk * reallocate(struct balloc * state, struct chunk * chunk, size_t byte_size)
 {
     uint32_t size = round_up(byte_size);
     // 4 cases
@@ -547,7 +551,7 @@ struct chunk * reallocate(struct knuth * state, struct chunk * chunk, size_t byt
     return new_chunk;
 }
 
-void knuth_init(struct knuth * state, void * buff,
+void balloc_init(struct balloc * state, void * buff,
                 size_t buff_size, uint32_t power)
 {
     state->buffer = (uint32_t *) buff;
@@ -562,23 +566,23 @@ void knuth_init(struct knuth * state, void * buff,
     set_footer(init, init->size);
 
     // add it to the free list
-    for (int i = 0; i <  K_LIST_CLASSES; ++i) {
+    for (int i = 0; i < BALLOC_LIST_CLASSES; ++i) {
         state->lists[i] = NIL;
     }
     add_free_chunk(state, init);
 }
 
-void * knuth_malloc(struct knuth * state, size_t size)
+void * balloc_malloc(struct balloc * state, size_t size)
 {
     return get_ptr(allocate(state, size, 0));
 }
 
-void * knuth_calloc(struct knuth * state, size_t nmemb, size_t size)
+void * balloc_calloc(struct balloc * state, size_t nmemb, size_t size)
 {
     return get_ptr(allocate(state, nmemb * size, 1));
 }
 
-void knuth_free(struct knuth * state, void * ptr)
+void balloc_free(struct balloc * state, void * ptr)
 {
     if (ptr == NULL)
         return;
@@ -598,15 +602,15 @@ void knuth_free(struct knuth * state, void * ptr)
     deallocate(state, chunk);
 }
 
-void * knuth_realloc(struct knuth * state, void * ptr, size_t size)
+void * balloc_realloc(struct balloc * state, void * ptr, size_t size)
 {
     // defined: realloc with NULL ptr is a malloc
     if (ptr == NULL)
-        return knuth_malloc(state, size);
+        return balloc_malloc(state, size);
 
     // defined: realloc with size 0 is a free
     if (size == 0) {
-        knuth_free(state, ptr);
+        balloc_free(state, ptr);
         return NULL;
     }
 

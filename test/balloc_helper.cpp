@@ -5,9 +5,9 @@
 #include <sstream>
 #include <string>
 
-#include <knuth.h>
+#include <balloc.h>
 
-// copied from knuth.c for debugging purposes
+// copied from balloc.c for debugging purposes
 static inline
 uint32_t round_down(size_t byte_size)
 {
@@ -24,7 +24,7 @@ struct chunk
 };
 
 static inline
-struct chunk * get_chunk(struct knuth * state, uint32_t offset)
+struct chunk * get_chunk(struct balloc * state, uint32_t offset)
 {
     if (offset == NIL)
         return NULL;
@@ -33,7 +33,7 @@ struct chunk * get_chunk(struct knuth * state, uint32_t offset)
 }
 
 static inline
-uint32_t get_offset(struct knuth * state, struct chunk * chunk)
+uint32_t get_offset(struct balloc * state, struct chunk * chunk)
 {
     if (chunk == NULL)
         return NIL;
@@ -43,7 +43,7 @@ uint32_t get_offset(struct knuth * state, struct chunk * chunk)
     return off;
 }
 
-std::string print_free_list(struct knuth * state, int * ret)
+std::string print_free_list(struct balloc * state, int * ret)
 {
     std::stringstream sstream;
     static char buf[128];
@@ -51,7 +51,7 @@ std::string print_free_list(struct knuth * state, int * ret)
     sprintf(buf, "Knuth free list::\n");
     sstream << buf;
 
-    for (int i = 0; i < K_LIST_CLASSES; ++i) {
+    for (int i = 0; i < BALLOC_LIST_CLASSES; ++i) {
         struct chunk * curr = get_chunk(state, state->lists[i]);
         struct chunk * prev = NULL;
         while (curr != NULL) {

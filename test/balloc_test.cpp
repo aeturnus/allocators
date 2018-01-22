@@ -7,7 +7,7 @@
 #include <set>
 
 #include <gtest/gtest.h>
-#include <knuth.h>
+#include <balloc.h>
 
 std::string print_buffer(int32_t * buffer, size_t num)
 {
@@ -21,75 +21,75 @@ std::string print_buffer(int32_t * buffer, size_t num)
 }
 #define pbuf(buffer) print_buffer(buffer, sizeof(buffer)/sizeof(buffer[0]))
 
-extern std::string print_free_list(struct knuth * state, int * ret);
+extern std::string print_free_list(struct balloc * state, int * ret);
 
-TEST(knuth, init)
+TEST(balloc, init)
 {
-    struct knuth state;
+    struct balloc state;
     static int32_t buffer[128];
-    knuth_init(&state, buffer, sizeof(buffer), 2);
+    balloc_init(&state, buffer, sizeof(buffer), 2);
     ASSERT_EQ(126, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(126, buffer[127]) << pbuf(buffer);
 }
 
-TEST(knuth, malloc_small)
+TEST(balloc, malloc_small)
 {
-    struct knuth state;
+    struct balloc state;
     static int32_t buffer[8];
-    knuth_init(&state, buffer, sizeof(buffer), 2);
-    void * p = knuth_malloc(&state, 1);
+    balloc_init(&state, buffer, sizeof(buffer), 2);
+    void * p = balloc_malloc(&state, 1);
     ASSERT_EQ(-2, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(-2, buffer[3]) << pbuf(buffer);
     ASSERT_EQ( 2, buffer[4]) << pbuf(buffer);
     ASSERT_EQ( 2, buffer[7]) << pbuf(buffer);
-    knuth_free(&state, p);
+    balloc_free(&state, p);
 }
 
-TEST(knuth, malloc_aligned)
+TEST(balloc, malloc_aligned)
 {
-    struct knuth state;
+    struct balloc state;
     static int32_t buffer[32];
-    knuth_init(&state, buffer, sizeof(buffer), 2);
-    void * p = knuth_malloc(&state, 2 * 4);
+    balloc_init(&state, buffer, sizeof(buffer), 2);
+    void * p = balloc_malloc(&state, 2 * 4);
     ASSERT_EQ(-2, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(-2, buffer[3]) << pbuf(buffer);
     ASSERT_EQ(26, buffer[4]) << pbuf(buffer);
     ASSERT_EQ(26, buffer[31]) << pbuf(buffer);
-    knuth_free(&state, p);
+    balloc_free(&state, p);
 }
 
-TEST(knuth, malloc_unaligned)
+TEST(balloc, malloc_unaligned)
 {
-    struct knuth state;
+    struct balloc state;
     static int32_t buffer[32];
-    knuth_init(&state, buffer, sizeof(buffer), 2);
-    void * p = knuth_malloc(&state, 2 * 4 + 2);
+    balloc_init(&state, buffer, sizeof(buffer), 2);
+    void * p = balloc_malloc(&state, 2 * 4 + 2);
     ASSERT_EQ(-3, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(-3, buffer[4]) << pbuf(buffer);
     ASSERT_EQ(25, buffer[5]) << pbuf(buffer);
     ASSERT_EQ(25, buffer[31]) << pbuf(buffer);
-    knuth_free(&state, p);
+    balloc_free(&state, p);
 }
 
-TEST(knuth, calloc_aligned)
+TEST(balloc, calloc_aligned)
 {
-    struct knuth state;
+    struct balloc state;
     static int32_t buffer[32];
-    knuth_init(&state, buffer, sizeof(buffer), 2);
-    void * p = knuth_calloc(&state, sizeof(int32_t), 2);
+    balloc_init(&state, buffer, sizeof(buffer), 2);
+    void * p = balloc_calloc(&state, sizeof(int32_t), 2);
     ASSERT_EQ(-2, buffer[0]) << pbuf(buffer);
     ASSERT_EQ( 0, buffer[1]) << pbuf(buffer);
     ASSERT_EQ( 0, buffer[2]) << pbuf(buffer);
     ASSERT_EQ(-2, buffer[3]) << pbuf(buffer);
-    knuth_free(&state, p);
+    balloc_free(&state, p);
 }
 
-TEST(knuth, calloc_unaligned)
+TEST(balloc, calloc_unaligned)
 {
-    struct knuth state;
+    struct balloc state;
     static int32_t buffer[32];
-    knuth_init(&state, buffer, sizeof(buffer), 2);
-    void * p = knuth_calloc(&state, sizeof(uint8_t), 2 * 4 + 2);
+    balloc_init(&state, buffer, sizeof(buffer), 2);
+    void * p = balloc_calloc(&state, sizeof(uint8_t), 2 * 4 + 2);
     ASSERT_EQ(-3, buffer[0]) << pbuf(buffer);
     ASSERT_EQ( 0, buffer[1]) << pbuf(buffer);
     ASSERT_EQ( 0, buffer[2]) << pbuf(buffer);
@@ -97,77 +97,77 @@ TEST(knuth, calloc_unaligned)
     ASSERT_EQ(-3, buffer[4]) << pbuf(buffer);
     ASSERT_EQ(25, buffer[5]) << pbuf(buffer);
     ASSERT_EQ(25, buffer[31]) << pbuf(buffer);
-    knuth_free(&state, p);
+    balloc_free(&state, p);
 }
 
-TEST(knuth, free)
+TEST(balloc, free)
 {
-    struct knuth state;
+    struct balloc state;
     static int32_t buffer[16];
-    knuth_init(&state, buffer, sizeof(buffer), 2);
-    void * p = knuth_malloc(&state, 2 * 4);
+    balloc_init(&state, buffer, sizeof(buffer), 2);
+    void * p = balloc_malloc(&state, 2 * 4);
     ASSERT_EQ(-2, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(-2, buffer[3]) << pbuf(buffer);
     ASSERT_EQ(10, buffer[4]) << pbuf(buffer);
     ASSERT_EQ(10, buffer[15]) << pbuf(buffer);
-    knuth_free(&state, p);
+    balloc_free(&state, p);
     // should coalesce these
     ASSERT_EQ(14, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(14, buffer[15]) << pbuf(buffer);
 }
 
-TEST(knuth, free_coalesce)
+TEST(balloc, free_coalesce)
 {
-    struct knuth state;
+    struct balloc state;
     static int32_t buffer[20];
-    knuth_init(&state, buffer, sizeof(buffer), 2);
+    balloc_init(&state, buffer, sizeof(buffer), 2);
     void * ptrs[5];
     for (int i = 0; i < 5; ++i) {
-        ptrs[i] = knuth_malloc(&state, sizeof(int32_t) * 2);
+        ptrs[i] = balloc_malloc(&state, sizeof(int32_t) * 2);
     }
 
-    knuth_free(&state, ptrs[0]);
-    knuth_free(&state, ptrs[4]);
-    knuth_free(&state, ptrs[1]);
-    knuth_free(&state, ptrs[3]);
-    knuth_free(&state, ptrs[2]);
+    balloc_free(&state, ptrs[0]);
+    balloc_free(&state, ptrs[4]);
+    balloc_free(&state, ptrs[1]);
+    balloc_free(&state, ptrs[3]);
+    balloc_free(&state, ptrs[2]);
 
     // should have coalesced into one big chunk
     ASSERT_EQ(18, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(18, buffer[19]) << pbuf(buffer);
 }
 
-TEST(knuth, realloc_same)
+TEST(balloc, realloc_same)
 {
-    struct knuth state;
+    struct balloc state;
     static int32_t buffer[8];
-    knuth_init(&state, buffer, sizeof(buffer), 2);
+    balloc_init(&state, buffer, sizeof(buffer), 2);
     const char * expect = "0123456789";
-    char * str = (char *) knuth_malloc(&state, sizeof(char) * (strlen(expect) + 1));
+    char * str = (char *) balloc_malloc(&state, sizeof(char) * (strlen(expect) + 1));
     strcpy(str, expect);
-    char * new_str = (char *) knuth_realloc(&state, str, sizeof(char) * (strlen(expect) + 2));
+    char * new_str = (char *) balloc_realloc(&state, str, sizeof(char) * (strlen(expect) + 2));
     ASSERT_EQ(str, new_str);
     ASSERT_STREQ(expect, new_str);
 }
 
 // coalesce to the right, in place
-TEST(knuth, realloc_coalesce_r)
+TEST(balloc, realloc_coalesce_r)
 {
-    struct knuth state;
+    struct balloc state;
     static int32_t buffer[20];
-    knuth_init(&state, buffer, sizeof(buffer), 2);
+    balloc_init(&state, buffer, sizeof(buffer), 2);
     void * ptrs[5];
     for (int i = 0; i < 5; ++i) {
-        ptrs[i] = knuth_malloc(&state, sizeof(int32_t) * 2);
+        ptrs[i] = balloc_malloc(&state, sizeof(int32_t) * 2);
     }
 
     const char * expect = "hello";
     strcpy((char *)ptrs[2], expect);
-    knuth_free(&state, ptrs[0]);
-    knuth_free(&state, ptrs[4]);
-    knuth_free(&state, ptrs[1]);
-    knuth_free(&state, ptrs[3]);
-    char * new_str = (char *) knuth_realloc(&state, ptrs[2], 12);
+    balloc_free(&state, ptrs[0]);
+    balloc_free(&state, ptrs[4]);
+    balloc_free(&state, ptrs[1]);
+    balloc_free(&state, ptrs[3]);
+    char * new_str = (char *) balloc_realloc(&state, ptrs[2], 12);
 
     ASSERT_EQ(ptrs[2], new_str) << pbuf(buffer);
     ASSERT_STREQ(expect, new_str) << pbuf(buffer);
@@ -175,23 +175,23 @@ TEST(knuth, realloc_coalesce_r)
     ASSERT_EQ(-3, buffer[12]) << pbuf(buffer);
 }
 
-TEST(knuth, realloc_coalesce)
+TEST(balloc, realloc_coalesce)
 {
-    struct knuth state;
+    struct balloc state;
     static int32_t buffer[20];
-    knuth_init(&state, buffer, sizeof(buffer), 2);
+    balloc_init(&state, buffer, sizeof(buffer), 2);
     void * ptrs[5];
     for (int i = 0; i < 5; ++i) {
-        ptrs[i] = knuth_malloc(&state, sizeof(int32_t) * 2);
+        ptrs[i] = balloc_malloc(&state, sizeof(int32_t) * 2);
     }
 
     const char * expect = "hello";
     strcpy((char *)ptrs[2], expect);
-    knuth_free(&state, ptrs[0]);
-    knuth_free(&state, ptrs[4]);
-    knuth_free(&state, ptrs[1]);
-    knuth_free(&state, ptrs[3]);
-    char * new_str = (char *) knuth_realloc(&state, ptrs[2], sizeof(int32_t) * 18);
+    balloc_free(&state, ptrs[0]);
+    balloc_free(&state, ptrs[4]);
+    balloc_free(&state, ptrs[1]);
+    balloc_free(&state, ptrs[3]);
+    char * new_str = (char *) balloc_realloc(&state, ptrs[2], sizeof(int32_t) * 18);
 
     // coalesce should've placed this pointer where ptrs[0] is
     ASSERT_EQ(ptrs[0], new_str) << pbuf(buffer);
@@ -200,22 +200,22 @@ TEST(knuth, realloc_coalesce)
     ASSERT_EQ(-18, buffer[19]) << pbuf(buffer);
 }
 
-TEST(knuth, realloc_new)
+TEST(balloc, realloc_new)
 {
-    struct knuth state;
+    struct balloc state;
     static int32_t buffer[20];
-    knuth_init(&state, buffer, sizeof(buffer), 2);
+    balloc_init(&state, buffer, sizeof(buffer), 2);
     void * ptrs[5];
     for (int i = 0; i < 5; ++i) {
-        ptrs[i] = knuth_malloc(&state, sizeof(int32_t) * 2);
+        ptrs[i] = balloc_malloc(&state, sizeof(int32_t) * 2);
     }
 
     const char * expect = "hello";
     strcpy((char *)ptrs[4], expect);
-    knuth_free(&state, ptrs[0]);
-    knuth_free(&state, ptrs[1]);
-    knuth_free(&state, ptrs[2]);
-    char * new_str = (char *) knuth_realloc(&state, ptrs[4], 12);
+    balloc_free(&state, ptrs[0]);
+    balloc_free(&state, ptrs[1]);
+    balloc_free(&state, ptrs[2]);
+    char * new_str = (char *) balloc_realloc(&state, ptrs[4], 12);
 
     // coalesce should've placed this pointer where ptrs[0] is
     ASSERT_EQ(ptrs[0], new_str) << pbuf(buffer);
@@ -226,9 +226,9 @@ TEST(knuth, realloc_new)
 
 #define max(x,y) ((x > y) ? x : y)
 
-TEST(knuth, many_allocs)
+TEST(balloc, many_allocs)
 {
-    struct knuth state;
+    struct balloc state;
     constexpr int NUM_WORDS = 1024 * 1024;
     constexpr int SIZE = 128;
     /*
@@ -236,7 +236,7 @@ TEST(knuth, many_allocs)
     constexpr int SIZE = 32;
     */
     static int32_t buffer[NUM_WORDS];
-    knuth_init(&state, buffer, sizeof(buffer), 2);
+    balloc_init(&state, buffer, sizeof(buffer), 2);
     std::set<void *> ptrs;
 
     ASSERT_EQ(NUM_WORDS - 2, buffer[0]);
@@ -246,13 +246,13 @@ TEST(knuth, many_allocs)
     void * ptr = NULL;
     size_t count = 0;
     do {
-        ptr = knuth_malloc(&state, max(rand() % SIZE, 1));
+        ptr = balloc_malloc(&state, max(rand() % SIZE, 1));
         ptrs.insert(ptr);
         ++count;
     } while (ptr != NULL);
 
     for (void * ptr : ptrs) {
-        knuth_free(&state, ptr);
+        balloc_free(&state, ptr);
         --count;
     }
 
@@ -265,9 +265,9 @@ TEST(knuth, many_allocs)
 
 //#define PRINT_FREE_LIST
 
-TEST(knuth, many_allocs_and_frees)
+TEST(balloc, many_allocs_and_frees)
 {
-    struct knuth state;
+    struct balloc state;
     ///*
     constexpr int NUM_WORDS = 1024 * 1024;
     constexpr int SIZE = 4096;
@@ -279,7 +279,7 @@ TEST(knuth, many_allocs_and_frees)
     constexpr int ACTIONS = 128;
     */
     static int32_t buffer[NUM_WORDS];
-    knuth_init(&state, buffer, sizeof(buffer), 2);
+    balloc_init(&state, buffer, sizeof(buffer), 2);
     std::set<void *> ptrs;
 
     ASSERT_EQ(NUM_WORDS - 2, buffer[0]);
@@ -296,7 +296,7 @@ TEST(knuth, many_allocs_and_frees)
         int r = rand() % 2;
         if (r == 0 || ptrs.empty()) {
             // malloc random amount
-            ptr = knuth_malloc(&state, max(rand() % SIZE, 1));
+            ptr = balloc_malloc(&state, max(rand() % SIZE, 1));
             if (ptr != NULL) {
                 ptrs.insert(ptr);
                 ++count;
@@ -310,7 +310,7 @@ TEST(knuth, many_allocs_and_frees)
             std::advance(it, rand() % ptrs.size());
             ptr = *it;
             ptrs.erase(ptr);
-            knuth_free(&state, ptr);
+            balloc_free(&state, ptr);
             --count;
             #ifdef PRINT_FREE_LIST
             std::cout << "Action: free" << std::endl;
@@ -324,7 +324,7 @@ TEST(knuth, many_allocs_and_frees)
     }
 
     for (void * ptr : ptrs) {
-        knuth_free(&state, ptr);
+        balloc_free(&state, ptr);
         --count;
     }
     ptrs.clear();
@@ -336,25 +336,25 @@ TEST(knuth, many_allocs_and_frees)
     ASSERT_EQ(NUM_WORDS - 2, buffer[NUM_WORDS - 1]) << pbuf(buffer);
 }
 
-TEST(knuth, many_reallocs)
+TEST(balloc, many_reallocs)
 {
-    struct knuth state;
+    struct balloc state;
     constexpr int NUM_WORDS = 1024 * 1024;
     static int32_t buffer[NUM_WORDS];
-    knuth_init(&state, buffer, sizeof(buffer), 2);
+    balloc_init(&state, buffer, sizeof(buffer), 2);
 
     const char * expect = "hello";
 
-    char * str = (char *) knuth_malloc(&state, 6);
+    char * str = (char *) balloc_malloc(&state, 6);
     strcpy(str, expect);
     ASSERT_STREQ(expect, str);
 
     for (int i = 0; i < (NUM_WORDS-10) / 10; ++i) {
-        str = (char *) knuth_realloc(&state, str, 10 * (i + 1));
+        str = (char *) balloc_realloc(&state, str, 10 * (i + 1));
         ASSERT_STREQ(expect, str) << "Failed at iteration " << i;
     }
 
-    knuth_free(&state, str);
+    balloc_free(&state, str);
 
     ASSERT_EQ(NUM_WORDS - 2, buffer[0]) << pbuf(buffer);
     ASSERT_EQ(NUM_WORDS - 2, buffer[NUM_WORDS - 1]) << pbuf(buffer);
